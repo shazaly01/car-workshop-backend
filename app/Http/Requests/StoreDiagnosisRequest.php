@@ -29,7 +29,7 @@ public function rules(): array
         'technician_id' => 'nullable|exists:users,id', // الفني يجب أن يكون مستخدماً مسجلاً
         'obd_codes' => 'nullable|array', // يمكن أن يكون مصفوفة من الأكواد
         'obd_codes.*' => 'string|max:10', // كل كود داخل المصفوفة يجب أن يكون نصاً
-        'manual_inspection_results' => 'required|string|min:20',
+        'manual_inspection_results' => 'required|string|min:5',
         'proposed_repairs' => 'nullable|string',
     ];
 }

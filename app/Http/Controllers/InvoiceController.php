@@ -10,9 +10,63 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Http\JsonResponse;
 use App\Http\Requests\StoreInvoiceRequest;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class InvoiceController extends Controller
 {
+
+
+   /**
+     * عرض قائمة بجميع الفواتير مع الفلترة والبحث.
+     *
+     * @param \Illuminate\Http\Request $request
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     */
+    public function index(Request $request): AnonymousResourceCollection
+    {
+        // ابدأ بالاستعلام مع تحميل علاقة العميل لتحسين الأداء
+        $query = Invoice::with('client')->latest();
+
+        // 1. الفلترة بالحالة (النسخة المحسّنة)
+        if ($request->filled('status') && $request->status !== 'all') {
+            $status = $request->status;
+
+            if ($status === 'due') {
+                // إذا طلبنا الفواتير "المستحقة"، فهي تشمل غير المدفوعة والمدفوعة جزئيًا
+                $query->whereIn('status', ['unpaid', 'partially_paid']);
+            } else {
+                // لأي حالة أخرى، استخدمها مباشرة
+                $query->where('status', 'like', $status);
+            }
+        }
+
+        // 2. الفلترة بنطاق التاريخ (إذا تم توفيره)
+        if ($request->filled('start_date')) {
+            $query->whereDate('issue_date', '>=', $request->start_date);
+        }
+        if ($request->filled('end_date')) {
+            $query->whereDate('issue_date', '<=', $request->end_date);
+        }
+
+        // 3. البحث (برقم الفاتورة أو اسم العميل)
+        if ($request->filled('search')) {
+            $searchTerm = $request->search;
+            $query->where(function ($q) use ($searchTerm) {
+                $q->where('number', 'like', "%{$searchTerm}%")
+                  ->orWhereHas('client', function ($clientQuery) use ($searchTerm) {
+                      $clientQuery->where('name', 'like', "%{$searchTerm}%");
+                  });
+            });
+        }
+
+        // تنفيذ الاستعلام مع الت分页 (Pagination)
+        // withQueryString() مهمة للحفاظ على الفلاتر عند التنقل بين الصفحات
+        $invoices = $query->paginate(15)->withQueryString();
+
+        return InvoiceResource::collection($invoices);
+    }
+
+
     /**
      * Store a new invoice for a completed work order.
      *
@@ -20,72 +74,75 @@ class InvoiceController extends Controller
      * @param \App\Models\WorkOrder $workOrder
      * @return \Illuminate\Http\JsonResponse|\App\Http\Resources\InvoiceResource
      */
-   public function store(StoreInvoiceRequest $request, WorkOrder $workOrder): InvoiceResource | JsonResponse
-    {
-        // 1. التحقق من منطق العمل
-        // التأكد من أن أمر العمل في حالة تسمح بالفوترة (مثلاً، جاهز للتسليم)
-        if ($workOrder->status !== 'ready_for_delivery') {
-            return response()->json(['message' => 'لا يمكن فوترة أمر العمل وهو ليس جاهزًا للتسليم.'], 409); // Conflict
-        }
-
-        // التأكد من عدم وجود فاتورة سابقة لهذا الأمر لمنع التكرار
-        if ($workOrder->invoice()->exists()) {
-            return response()->json(['message' => 'تم إصدار فاتورة لهذا الأمر بالفعل.'], 409);
-        }
-
-        // 2. جلب عرض السعر الموافق عليه (بافتراض وجود واحد فقط)
-        // ملاحظة: يجب أن يكون لديك منطق عمل يضمن وجود عرض سعر واحد موافق عليه فقط
-        $approvedQuotation = $workOrder->quotation()->where('status', 'approved')->first();
-
-        if (!$approvedQuotation) {
-            return response()->json(['message' => 'لا يوجد عرض سعر موافق عليه لإنشاء الفاتورة.'], 422); // Unprocessable Entity
-        }
-
-        // 3. استخدام Transaction لضمان سلامة البيانات
-        $invoice = DB::transaction(function () use ($workOrder, $approvedQuotation) {
-
-            // إنشاء الفاتورة (الرأس) بناءً على بيانات عرض السعر
-            $invoice = $workOrder->invoice()->create([
-                'client_id' => $workOrder->client_id,
-                'number' => $this->generateNextInvoiceNumber(), // <-- استخدام رقم متسلسل
-                'issue_date' => now(),
-                'due_date' => now()->addDays(15), // تاريخ الاستحقاق بعد 15 يوم مثلاً
-                'status' => 'unpaid', // الحالة الأولية
-                'subtotal' => $approvedQuotation->subtotal,
-                'tax_percentage' => 15.00, // يمكن جعله إعداداً عاماً
-                'tax_amount' => $approvedQuotation->tax_amount,
-                'total_amount' => $approvedQuotation->total_amount,
-                'paid_amount' => 0,
-            ]);
-
-            // --- التغيير الرئيسي هنا ---
-            // نسخ بنود عرض السعر إلى بنود الفاتورة مع الحفاظ على رابط الكتالوج
-            $invoiceItems = [];
-            foreach ($approvedQuotation->items as $quotationItem) {
-                $invoiceItems[] = [
-                    'catalog_item_id' => $quotationItem->catalog_item_id, // <-- نسخ رابط الكتالوج
-                    'description' => $quotationItem->description,
-                    'type' => $quotationItem->type,
-                    'quantity' => $quotationItem->quantity,
-                    'unit_price' => $quotationItem->unit_price,
-                    'total_price' => $quotationItem->total_price,
-                ];
-            }
-            $invoice->items()->createMany($invoiceItems);
-
-            // يمكنك تحديث حالة أمر العمل هنا إذا أردت
-            // $workOrder->status = 'completed';
-            // $workOrder->save();
-            // ملاحظة: قد يكون من الأفضل تغيير حالة أمر العمل إلى "مكتمل" بعد الدفع الكامل وليس فقط بعد إنشاء الفاتورة
-
-            return $invoice;
-        });
-
-        // تحميل العلاقات اللازمة للاستجابة الكاملة
-        $invoice->load(['client', 'items.catalogItem']);
-
-        return new InvoiceResource($invoice);
+public function store(Request $request, WorkOrder $workOrder): InvoiceResource | JsonResponse
+{
+    // 1. التحقق من منطق العمل
+    // التأكد من وجود عرض سعر أصلاً لإنشاء فاتورة منه
+    $quotation = $workOrder->quotation;
+    if (!$quotation) {
+        return response()->json(['message' => 'لا يمكن إنشاء فاتورة لعدم وجود عرض سعر.'], 422);
     }
+
+    // التأكد من عدم وجود فاتورة سابقة لهذا الأمر لمنع التكرار
+    if ($workOrder->invoice()->exists()) {
+        return response()->json(['message' => 'تم إصدار فاتورة لهذا الأمر بالفعل.'], 409);
+    }
+
+    // 2. استخدام Transaction لضمان سلامة البيانات
+    $invoice = DB::transaction(function () use ($workOrder, $quotation) {
+
+        // أ. إنشاء الفاتورة (الرأس) بناءً على بيانات عرض السعر
+        $invoice = $workOrder->invoice()->create([
+            'client_id' => $workOrder->client_id,
+            'number' => $this->generateNextInvoiceNumber(),
+            'issue_date' => now(),
+            'due_date' => now()->addDays(15),
+            'status' => 'unpaid', // الحالة الأولية
+            'subtotal' => $quotation->subtotal,
+            'tax_percentage' => 15.00,
+            'tax_amount' => $quotation->tax_amount,
+            'total_amount' => $quotation->total_amount,
+            'paid_amount' => 0,
+        ]);
+
+        // ب. نسخ بنود عرض السعر إلى بنود الفاتورة
+        $invoiceItems = [];
+        foreach ($quotation->items as $quotationItem) {
+            $invoiceItems[] = [
+                'catalog_item_id' => $quotationItem->catalog_item_id,
+                'description' => $quotationItem->description,
+                'type' => $quotationItem->type,
+                'quantity' => $quotationItem->quantity,
+                'unit_price' => $quotationItem->unit_price,
+                'total_price' => $quotationItem->total_price,
+            ];
+        }
+        $invoice->items()->createMany($invoiceItems);
+
+        // ج. [الخطوة الحاسمة] تحديث الحالات بعد إنشاء الفاتورة
+        $quotation->update(['status' => 'approved']);
+        $workOrder->update(['status' => 'in_progress']);
+
+        return $invoice;
+    });
+
+  $workOrder->refresh()->load([
+        'client',
+        'vehicle',
+        'diagnosis',
+        'quotation',
+        'invoice.items', // الأهم: تحميل الفاتورة الجديدة مع بنودها
+        'invoice.payments'
+    ]);
+
+    // 2. إرجاع كائن أمر العمل المحدث بالكامل باستخدام الـ Resource الخاص به.
+    return response()->json([
+        'message' => 'تم إنشاء الفاتورة بنجاح.',
+        'work_order' => new \App\Http\Resources\WorkOrderResource($workOrder) // <-- إرجاع أمر العمل
+    ]);
+
+}
+
 
     /**
      * دالة مساعدة بسيطة لإنشاء رقم فاتورة متسلسل
@@ -104,6 +161,23 @@ class InvoiceController extends Controller
 
         // INV-2025-0001
         return 'INV-' . date('Y') . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
+    }
+
+
+
+
+    /**
+     * [جديد] عرض تفاصيل فاتورة واحدة مع جميع علاقاتها.
+     *
+     * @param \App\Models\Invoice $invoice
+     * @return \App\Http\Resources\InvoiceResource
+     */
+    public function show(Invoice $invoice): InvoiceResource
+    {
+        // تحميل جميع العلاقات التي نحتاجها في صفحة التفاصيل دفعة واحدة
+        $invoice->load(['client', 'items', 'payments.receivedBy']);
+
+        return new InvoiceResource($invoice);
     }
 
 

@@ -11,6 +11,7 @@ class PaymentResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'status' => $this->status,
             'amount' => (float) $this->amount,
             'payment_date' => $this->payment_date->toFormattedDateString(),
             'payment_method' => $this->payment_method,

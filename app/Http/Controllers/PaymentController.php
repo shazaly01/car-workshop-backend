@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\StorePaymentRequest;
-use App\Http\Resources\PaymentResource;
+use App\Http\Resources\InvoiceResource;
 use App\Models\Invoice;
 use App\Models\Payment; // <-- 1. استيراد النموذج الصحيح
 use Illuminate\Http\JsonResponse;
@@ -23,7 +23,8 @@ class PaymentController extends Controller
      * @param \App\Models\Invoice $invoice
      * @return \Illuminate\Http\JsonResponse|\App\Http\Resources\PaymentResource
      */
-    public function store(StorePaymentRequest $request, Invoice $invoice): JsonResponse | PaymentResource
+    public function store(StorePaymentRequest $request, Invoice $invoice): JsonResponse | InvoiceResource
+
     {
         // 2. التحقق من الصلاحية الصحيحة: هل يمكن للمستخدم إنشاء دفعة لهذه الفاتورة؟
         $this->authorize('create', [Payment::class, $invoice]);
@@ -72,10 +73,11 @@ class PaymentController extends Controller
                 return $payment;
             });
 
-            // تحميل علاقة الموظف الذي استلم الدفعة
-            $payment->load('receivedBy');
+             // بعد حفظ الفاتورة، قم بتحميل كل علاقاتها اللازمة للعرض
+            $invoice->load(['client', 'items', 'payments.receivedBy']);
 
-            return new PaymentResource($payment);
+            // إرجاع كائن الفاتورة المحدث بالكامل
+            return new InvoiceResource($invoice);
 
         } catch (Exception $e) {
             // التقاط الاستثناء الذي تم إطلاقه من داخل الـ Transaction
@@ -84,4 +86,52 @@ class PaymentController extends Controller
             ], 422); // Unprocessable Entity
         }
     }
+
+
+
+       /**
+     * إلغاء دفعة مسجلة (Void a payment).
+     *
+     * @param \App\Models\Payment $payment
+     * @return \App\Http\Resources\InvoiceResource
+     */
+    public function destroy(Payment $payment): InvoiceResource
+    {
+        if ($payment->status === 'voided') {
+            abort(409, 'هذه الدفعة ملغاة بالفعل.');
+        }
+
+        $invoice = $payment->invoice;
+
+        DB::transaction(function () use ($payment, $invoice) {
+            // 1. قفل الفاتورة لضمان سلامة البيانات
+            $invoiceToUpdate = Invoice::where('id', $invoice->id)->lockForUpdate()->first();
+
+            // --- [بداية الحل الحاسم] ---
+            // 2. تحديث حالة الدفعة نفسها التي تم تمريرها للدالة
+            // هذا هو السطر الذي كان ينقصنا
+            $payment->status = 'voided';
+            $payment->save();
+            // --- [نهاية الحل الحاسم] ---
+
+            // 3. عكس تأثير الدفعة على الفاتورة
+            $invoiceToUpdate->paid_amount -= $payment->amount;
+
+            // 4. تحديث حالة الفاتورة
+            if ($invoiceToUpdate->paid_amount <= 0) {
+                $invoiceToUpdate->status = 'unpaid';
+                $invoiceToUpdate->paid_amount = 0;
+            } else {
+                $invoiceToUpdate->status = 'partially_paid';
+            }
+            $invoiceToUpdate->save();
+        });
+
+        // 5. أعد تحميل الفاتورة مع جميع علاقاتها للحصول على أحدث نسخة
+        $invoice->refresh()->load(['client', 'items', 'payments.receivedBy']);
+
+        // 6. قم بإرجاع الفاتورة المحدثة بالكامل.
+        return new InvoiceResource($invoice);
+    }
+
 }

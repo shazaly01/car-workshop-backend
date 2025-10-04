@@ -11,6 +11,7 @@ class QuotationItemResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'catalog_item_id' => $this->catalog_item_id,
             'description' => $this->description,
             'type' => $this->type,
             'quantity' => (float) $this->quantity,

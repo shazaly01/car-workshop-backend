@@ -25,14 +25,26 @@ class WorkOrderController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(Request $request)
+   public function index(Request $request)
     {
         $query = WorkOrder::with(['client', 'vehicle'])->latest();
 
-        // إضافة فلترة بسيطة بناءً على الحالة
+        // --- [بداية التعديل الرئيسي] ---
+
+        // إضافة فلترة ذكية بناءً على الحالة
         if ($request->has('status')) {
-            $query->where('status', $request->query('status'));
+            $status = $request->query('status');
+
+            if ($status === 'active') {
+                // إذا كان الفلتر هو "غير مكتمل"، استبعد الحالات النهائية
+                $query->whereNotIn('status', ['completed', 'cancelled']);
+            } else {
+                // لأي فلتر آخر (مثل 'completed')، استخدم تطابقًا تامًا
+                $query->where('status', $status);
+            }
         }
+
+        // --- [نهاية التعديل الرئيسي] ---
 
         $workOrders = $query->paginate(20);
 
@@ -62,21 +74,33 @@ class WorkOrderController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(WorkOrder $workOrder): WorkOrderResource
-    {
-        // تحميل كل العلاقات المتعلقة بأمر العمل لعرض صفحة تفاصيل كاملة
-        $workOrder->load([
-            'client',
-            'vehicle',
-            'createdBy',
-            'diagnosis',
-            'quotation.items', // تحميل عروض الأسعار مع بنودها
-            'invoice.items',    // تحميل الفاتورة مع بنودها
-            'invoice.payments'  // تحميل مدفوعات الفاتورة
-        ]);
+   public function show(WorkOrder $workOrder): WorkOrderResource
+{
+    // --- هذا هو التعديل المقترح ---
 
-        return new WorkOrderResource($workOrder);
+    // 1. قم دائمًا بتحميل العلاقات الأساسية التي توجد دائمًا
+    $workOrder->load(['client', 'vehicle', 'createdBy']);
+
+    // 2. قم بتحميل العلاقات الأخرى بشكل مشروط
+    // استخدم loadMissing لتجنب إعادة التحميل إذا كانت محملة بالفعل
+
+    // إذا كان أمر العمل يحتوي على تشخيص، قم بتحميله ومعه الفني
+    if ($workOrder->diagnosis) {
+        $workOrder->loadMissing('diagnosis.technician');
     }
+
+    // إذا كان أمر العمل يحتوي على عرض سعر، قم بتحميله ومعه البنود
+    if ($workOrder->quotation) {
+        $workOrder->loadMissing('quotation.items');
+    }
+
+    // إذا كان أمر العمل يحتوي على فاتورة، قم بتحميلها مع بنودها ودفعاتها
+    if ($workOrder->invoice) {
+        $workOrder->loadMissing('invoice.items', 'invoice.payments');
+    }
+
+    return new WorkOrderResource($workOrder);
+}
 
     /**
      * Update the specified resource in storage.
@@ -135,4 +159,30 @@ class WorkOrderController extends Controller
     return $nextNumber;
 }
 
+
+/**
+ * جهز بيانات أمر عمل واحد لغرض الطباعة.
+ *
+ * @param WorkOrder $workOrder
+ * @return WorkOrderResource
+ */
+public function print(WorkOrder $workOrder): WorkOrderResource
+{
+    // استنادًا إلى سياسة 'view'، هل يمكن للمستخدم الحالي عرض أمر العمل هذا؟
+    $this->authorize('view', $workOrder);
+
+    // تحميل جميع العلاقات اللازمة للطباعة بشكل كامل وعميق
+    $workOrder->load([
+        'client', // بيانات العميل
+        'vehicle', // بيانات السيارة
+        'createdBy', // بيانات المستخدم الذي أنشأ الأمر
+        'diagnosis.technician', // بيانات التشخيص مع الفني الذي قام به
+        'quotation.items.catalogItem', // عرض السعر مع بنوده، وكل بند مع أصله في الكتالوج
+        'invoice.items', // الفاتورة مع بنودها
+        'invoice.payments' // الفاتورة مع دفعاتها
+    ]);
+
+    // إرجاع البيانات المجمعة باستخدام نفس الـ Resource
+    return new WorkOrderResource($workOrder);
+}
 }

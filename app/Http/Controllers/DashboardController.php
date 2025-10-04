@@ -5,58 +5,95 @@ namespace App\Http\Controllers;
 use App\Models\Client;
 use App\Models\Invoice;
 use App\Models\WorkOrder;
-use Illuminate\Http\Request;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
     /**
-     * Handle the incoming request.
+     * جلب جميع البيانات اللازمة لعرض لوحة التحكم.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param \Illuminate\Http\Request $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function __invoke(Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        // 1. عدد السيارات قيد الصيانة
-        // (الحالات التي تعتبر "قيد الصيانة" فعلياً)
-        $activeMaintenanceCount = WorkOrder::whereIn('status', [
-            'in_progress',
-            'diagnosing',
-            'pending_parts',
-            'quality_check'
-        ])->count();
+        // 1. إحصائية: عدد أوامر العمل قيد التنفيذ
+        $workOrdersInProgressCount = WorkOrder::whereNotIn('status', ['completed', 'cancelled'])->count();
 
-        // 2. عدد الفواتير المعلقة (غير مدفوعة أو مدفوعة جزئياً)
-        $pendingInvoicesCount = Invoice::whereIn('status', ['unpaid', 'partially_paid'])->count();
+        // 2. إحصائية: عدد الفواتير المعلقة (غير مدفوعة)
+        $pendingInvoicesCount = Invoice::whereNotIn('status', ['paid', 'voided'])->count();
 
-        // 3. إجمالي المبالغ المستحقة من الفواتير المعلقة
-        $totalDueAmount = Invoice::whereIn('status', ['unpaid', 'partially_paid'])
-                                 ->sum(DB::raw('total_amount - paid_amount'));
+        // 3. إحصائية: عدد أوامر العمل المكتملة اليوم
+        $completedTodayCount = WorkOrder::where('status', 'completed')
+            ->whereDate('updated_at', Carbon::today())
+            ->count();
 
-        // 4. أكثر 5 عملاء نشاطاً (بناءً على عدد أوامر العمل)
-        $mostActiveClients = Client::withCount('workOrders') // يضيف عموداً وهمياً 'work_orders_count'
-                                    ->orderBy('work_orders_count', 'desc')
-                                    ->limit(5)
-                                    ->get(['id', 'name', 'work_orders_count']);
+        // 4. قائمة: أحدث 5 أوامر عمل
+        $latestWorkOrders = WorkOrder::with(['client', 'vehicle'])
+            ->latest() // الترتيب حسب created_at تنازلياً
+            ->take(5)
+            ->get()
+            ->map(function ($workOrder) {
+                // إعادة هيكلة بسيطة لتسهيل العرض في الواجهة الأمامية
+                return [
+                    'id' => $workOrder->id,
+                    'number' => $workOrder->number,
+                    'status' => $workOrder->status,
+                    'status_translated' => $this->getTranslatedStatus($workOrder->status),
+                    'client_name' => $workOrder->client->name,
+                    'vehicle_name' => $workOrder->vehicle->make . ' ' . $workOrder->vehicle->model,
+                ];
+            });
 
-        // 5. أحدث 5 أوامر عمل تم إنشاؤها
-        $latestWorkOrders = WorkOrder::with(['client:id,name', 'vehicle:id,make,model'])
-                                     ->latest()
-                                     ->limit(5)
-                                     ->get(['id', 'number', 'status', 'client_id', 'vehicle_id', 'created_at']);
+        // 5. قائمة: أكثر 5 عملاء نشاطاً
+        $topClients = Client::withCount(['workOrders' => function ($query) {
+                // يمكن إضافة فلتر زمني هنا إذا أردت، مثلاً لآخر 30 يوم
+                // $query->where('created_at', '>=', Carbon::now()->subDays(30));
+            }])
+            ->orderBy('work_orders_count', 'desc')
+            ->take(5)
+            ->get()
+            ->map(function ($client) {
+                return [
+                    'name' => $client->name,
+                    'orders_count' => $client->work_orders_count,
+                ];
+            });
 
-
-        // تجميع كل البيانات في استجابة JSON واحدة
+        // تجميع كل البيانات في استجابة واحدة
         return response()->json([
             'stats' => [
-                'active_maintenance_count' => $activeMaintenanceCount,
-                'pending_invoices_count' => $pendingInvoicesCount,
-                'total_due_amount' => (float) $totalDueAmount,
+                'work_orders_in_progress' => $workOrdersInProgressCount,
+                'pending_invoices' => $pendingInvoicesCount,
+                'work_orders_completed_today' => $completedTodayCount,
             ],
-            'most_active_clients' => $mostActiveClients,
             'latest_work_orders' => $latestWorkOrders,
+            'top_clients' => $topClients,
         ]);
+    }
+
+    /**
+     * دالة مساعدة لترجمة الحالات (مأخوذة من WorkOrderResource)
+     */
+    private function getTranslatedStatus(string $status): string
+    {
+        $statuses = [
+            'pending_diagnosis' => 'بانتظار التشخيص',
+            'diagnosing' => 'جاري التشخيص',
+            'pending_quote_approval' => 'بانتظار موافقة عرض السعر',
+            'quote_approved' => 'تمت الموافقة على عرض السعر',
+            'quote_rejected' => 'تم رفض عرض السعر',
+            'in_progress' => 'قيد الإصلاح',
+            'pending_parts' => 'بانتظار قطع غيار',
+            'quality_check' => 'فحص الجودة',
+            'ready_for_delivery' => 'جاهز للتسليم',
+            'completed' => 'مكتمل',
+            'cancelled' => 'ملغي',
+        ];
+
+        return $statuses[$status] ?? $status;
     }
 }

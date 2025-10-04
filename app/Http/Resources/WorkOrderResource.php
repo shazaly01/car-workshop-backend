@@ -24,14 +24,19 @@ class WorkOrderResource extends JsonResource
             'created_at' => $this->created_at->toDateTimeString(),
 
             // --- العلاقات المضمنة ---
-            // استخدام الموارد التي أنشأناها سابقاً
             'client' => new ClientResource($this->whenLoaded('client')),
             'vehicle' => new VehicleResource($this->whenLoaded('vehicle')),
-            'created_by' => new UserResource($this->whenLoaded('createdBy')), // سنحتاج لإنشاء UserResource
+            'created_by' => new UserResource($this->whenLoaded('createdBy')),
 
-            // --- علاقات أخرى يمكن تحميلها لاحقاً ---
+            // --- علاقات أخرى ---
             'diagnosis' => new DiagnosisResource($this->whenLoaded('diagnosis')),
-            'quotations' => QuotationResource::collection($this->whenLoaded('quotations')),
+
+            // --- هذا هو السطر الذي تم تصحيحه ---
+            // تم تغيير 'quotations' إلى 'quotation' (مفرد)
+            // وتم تغيير ::collection إلى new QuotationResource
+            // لأنها علاقة HasOne (واحد لواحد)
+            'quotation' => new QuotationResource($this->whenLoaded('quotation')),
+
             'invoice' => new InvoiceResource($this->whenLoaded('invoice')),
         ];
     }

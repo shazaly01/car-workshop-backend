@@ -28,6 +28,7 @@ class VehicleResource extends JsonResource
             // تضمين بيانات العميل المالك (إذا تم تحميلها)
             // هذا يوضح كيف يمكن تضمين علاقة داخل مورد آخر
             'owner' => new ClientResource($this->whenLoaded('client')),
+            'open_work_order' => new WorkOrderResource($this->whenLoaded('openWorkOrder')),
         ];
     }
 }

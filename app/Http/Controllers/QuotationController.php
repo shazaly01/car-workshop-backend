@@ -5,11 +5,13 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreQuotationRequest;
 use App\Http\Requests\UpdateQuotationRequest;
 use App\Http\Resources\QuotationResource;
+use App\Http\Resources\WorkOrderResource;
 use App\Models\CatalogItem;
 use App\Models\Quotation;
 use App\Models\WorkOrder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class QuotationController extends Controller
 {
@@ -59,11 +61,15 @@ class QuotationController extends Controller
                 'subtotal' => $subtotal,
                 'tax_amount' => $taxAmount,
                 'total_amount' => $totalAmount,
-                'status' => 'pending',
+                'status' => 'approved',
             ]);
 
-            // 3. أنشئ البنود
+            // 2. أنشئ البنود
             $quotation->items()->createMany($itemsToCreate);
+
+            // 3. حدّث حالة أمر العمل إلى "in_progress" فورًا
+            $workOrder->status = 'in_progress';
+            $workOrder->save();
 
             return $quotation;
         });
@@ -74,76 +80,104 @@ class QuotationController extends Controller
 
    // ... (داخل QuotationController.php)
 
-  public function update(UpdateQuotationRequest $request, Quotation $quotation): QuotationResource | JsonResponse
-    {
-        $validatedData = $request->validated();
+  /**
+     * Update the specified resource in storage.
+     *
+     * @param UpdateQuotationRequest $request
+     * @param Quotation $quotation
+     * @return WorkOrderResource|QuotationResource|JsonResponse
+     */
+   /**
+     * تحديث عرض سعر موجود ومزامنة الفاتورة المرتبطة به تلقائياً.
+     *
+     * @param \App\Http\Requests\UpdateQuotationRequest $request
+     * @param \App\Models\Quotation $quotation
+     * @return \App\Http\Resources\QuotationResource
+     */
+   // في ملف: app/Http/Controllers/QuotationController.php
 
-        // --- السيناريو الجديد: تحديث الحالة ---
-        if (isset($validatedData['status'])) {
-            // تحقق من أن عرض السعر في حالة تسمح بتغيير حالته
-            if ($quotation->status !== 'pending') {
-                return response()->json(['message' => 'لا يمكن تغيير حالة عرض السعر هذا لأنه ليس في حالة "معلق".'], 409);
-            }
+public function update(UpdateQuotationRequest $request, Quotation $quotation): QuotationResource
+{
+    $workOrder = $quotation->workOrder;
+    $invoice = $workOrder->invoice;
 
-            DB::transaction(function () use ($quotation, $validatedData) {
-                $quotation->status = $validatedData['status'];
-                $quotation->save();
-
-                // إذا تم الرفض، قم بإلغاء أمر العمل
-                if ($validatedData['status'] === 'rejected') {
-                    $quotation->workOrder()->update(['status' => 'cancelled']);
-                }
-                // إذا تمت الموافقة، قم بتغيير حالة أمر العمل
-                elseif ($validatedData['status'] === 'approved') {
-                    $quotation->workOrder()->update(['status' => 'in_progress']);
-                }
-            });
-
-            $quotation->load('workOrder'); // أعد تحميل العلاقة المحدثة
-            return new QuotationResource($quotation);
-        }
-
-
-        // --- السيناريو القديم: تحديث البنود ---
-        if (isset($validatedData['items'])) {
-            // تحقق من أن عرض السعر في حالة تسمح بالتعديل
-            if ($quotation->status !== 'pending') {
-                return response()->json(['message' => 'لا يمكن تعديل بنود عرض السعر هذا لأنه ليس في حالة "معلق".'], 409);
-            }
-
-            $updatedQuotation = DB::transaction(function () use ($validatedData, $quotation) {
-                // ... (منطق تحديث البنود يبقى كما هو)
-                $quotation->items()->delete();
-                $subtotal = 0;
-                $itemsToCreate = [];
-                foreach ($validatedData['items'] as $item) {
-                    $catalogItem = CatalogItem::find($item['catalog_item_id']);
-                    $unitPrice = $item['unit_price'];
-                    $totalPrice = $item['quantity'] * $unitPrice;
-                    $subtotal += $totalPrice;
-                    $itemsToCreate[] = [
-                        'catalog_item_id' => $catalogItem->id, 'description' => $catalogItem->name,
-                        'type' => $catalogItem->type, 'quantity' => $item['quantity'],
-                        'unit_price' => $unitPrice, 'total_price' => $totalPrice,
-                    ];
-                }
-                $taxAmount = $subtotal * 0.15;
-                $totalAmount = $subtotal + $taxAmount;
-                $quotation->update([
-                    'notes' => $validatedData['notes'] ?? $quotation->notes,
-                    'subtotal' => $subtotal, 'tax_amount' => $taxAmount, 'total_amount' => $totalAmount,
-                ]);
-                $quotation->items()->createMany($itemsToCreate);
-                return $quotation;
-            });
-
-            $updatedQuotation->load('items.catalogItem');
-            return new QuotationResource($updatedQuotation);
-        }
-
-        // في حالة إرسال طلب تحديث فارغ أو غير مدعوم
-        return response()->json(['message' => 'طلب التحديث غير صالح.'], 400);
+    if ($invoice && $invoice->status === 'paid') {
+        abort(403, 'لا يمكن تعديل عرض السعر لأن الفاتورة النهائية قد تم دفعها بالكامل.');
     }
+
+    $validatedData = $request->validated();
+
+    DB::transaction(function () use ($quotation, $validatedData, $invoice) {
+
+        // --- [بداية الإصلاح] ---
+
+        // 1. تحضير بيانات البنود الجديدة مع جلب الوصف من قاعدة البيانات
+        $itemsToCreate = [];
+        $catalogItemIds = array_column($validatedData['items'], 'catalog_item_id');
+
+        // جلب كل بنود الكتالوج المطلوبة في استعلام واحد لتحسين الأداء
+        $catalogItems = \App\Models\CatalogItem::whereIn('id', $catalogItemIds)->get()->keyBy('id');
+
+        foreach ($validatedData['items'] as $itemData) {
+            $catalogItem = $catalogItems->get($itemData['catalog_item_id']);
+            if ($catalogItem) {
+                $itemsToCreate[] = [
+                    'catalog_item_id' => $itemData['catalog_item_id'],
+                    'quantity' => $itemData['quantity'],
+                    'unit_price' => $itemData['unit_price'],
+                    // [الحل] إضافة الوصف والحقول الأخرى من الكتالوج مباشرة
+                    'description' => $catalogItem->name,
+                    'type' => $catalogItem->type,
+                    'total_price' => $itemData['quantity'] * $itemData['unit_price'],
+                ];
+            }
+        }
+
+        // 2. تحديث عرض السعر
+        $quotation->items()->delete();
+        $quotation->items()->createMany($itemsToCreate); // <-- استخدام البيانات المحضرة والكاملة
+
+        // --- [نهاية الإصلاح] ---
+
+        $quotation->load('items');
+
+        $subtotal = $quotation->items->sum('total_price');
+        $tax = $subtotal * 0.15;
+        $total = $subtotal + $tax;
+
+        $quotation->update([
+            'notes' => $validatedData['notes'] ?? $quotation->notes,
+            'subtotal' => $subtotal,
+            'tax_amount' => $tax,
+            'total_amount' => $total,
+        ]);
+
+        // --- مزامنة الفاتورة (المنطق هنا يبقى كما هو) ---
+        if ($invoice) {
+            $oldInvoiceAmount = $invoice->total_amount;
+
+            if ($invoice->paid_amount > 0) {
+                $invoice->revisions()->create([
+                    'user_id' => Auth::id(),
+                    'old_amount' => $oldInvoiceAmount,
+                    'new_amount' => $total,
+                ]);
+            }
+
+            $invoice->update([
+                'subtotal' => $subtotal,
+                'tax_amount' => $tax,
+                'total_amount' => $total,
+            ]);
+
+            $invoice->items()->delete();
+            // استخدام نفس البيانات المحضرة للفاتورة أيضًا
+            $invoice->items()->createMany($itemsToCreate);
+        }
+    });
+
+    return new QuotationResource($quotation->fresh(['items']));
+}
 
 // ... (بقية دوال المتحكم)
 

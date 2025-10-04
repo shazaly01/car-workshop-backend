@@ -16,11 +16,23 @@ class RolesAndPermissionsSeeder extends Seeder
 
         // --- تعريف الصلاحيات المفصلة ---
 
+        Permission::create(['name' => 'list users', 'guard_name' => 'api']); // تم تغييرها من view users للتوحيد
+        Permission::create(['name' => 'create users', 'guard_name' => 'api']);
+        Permission::create(['name' => 'edit users', 'guard_name' => 'api']);
+        Permission::create(['name' => 'delete users', 'guard_name' => 'api']);
+        Permission::create(['name' => 'assign roles', 'guard_name' => 'api']);
+
+
+         Permission::create(['name' => 'list roles', 'guard_name' => 'api']);
+        Permission::create(['name' => 'view roles', 'guard_name' => 'api']);
+        Permission::create(['name' => 'create roles', 'guard_name' => 'api']);
+        Permission::create(['name' => 'edit roles', 'guard_name' => 'api']);
+        Permission::create(['name' => 'delete roles', 'guard_name' => 'api']);
         // Dashboard
         Permission::create(['name' => 'view dashboard', 'guard_name' => 'api']);
 
         Permission::create(['name' => 'manage catalog', 'guard_name' => 'api']);
-        // Work Orders (ممتازة كما هي)
+        // Work Orders
         Permission::create(['name' => 'list work-orders', 'guard_name' => 'api']);
         Permission::create(['name' => 'view work-orders', 'guard_name' => 'api']);
         Permission::create(['name' => 'create work-orders', 'guard_name' => 'api']);
@@ -28,24 +40,24 @@ class RolesAndPermissionsSeeder extends Seeder
         Permission::create(['name' => 'delete work-orders', 'guard_name' => 'api']);
         Permission::create(['name' => 'change work-order status', 'guard_name' => 'api']);
 
-        // Diagnosis (ممتازة كما هي)
+        // Diagnosis
         Permission::create(['name' => 'add diagnosis', 'guard_name' => 'api']);
 
-        // Clients (تفصيلية)
+        // Clients
         Permission::create(['name' => 'list clients', 'guard_name' => 'api']);
         Permission::create(['name' => 'view clients', 'guard_name' => 'api']);
         Permission::create(['name' => 'create clients', 'guard_name' => 'api']);
         Permission::create(['name' => 'edit clients', 'guard_name' => 'api']);
         Permission::create(['name' => 'delete clients', 'guard_name' => 'api']);
 
-        // Vehicles (تفصيلية)
+        // Vehicles
         Permission::create(['name' => 'list vehicles', 'guard_name' => 'api']);
         Permission::create(['name' => 'view vehicles', 'guard_name' => 'api']);
         Permission::create(['name' => 'create vehicles', 'guard_name' => 'api']);
         Permission::create(['name' => 'edit vehicles', 'guard_name' => 'api']);
         Permission::create(['name' => 'delete vehicles', 'guard_name' => 'api']);
 
-        // Financials (تفصيلية)
+        // Financials
         Permission::create(['name' => 'create quotations', 'guard_name' => 'api']);
         Permission::create(['name' => 'edit quotations', 'guard_name' => 'api']);
         Permission::create(['name' => 'view quotations', 'guard_name' => 'api']);
@@ -53,6 +65,14 @@ class RolesAndPermissionsSeeder extends Seeder
         Permission::create(['name' => 'view invoices', 'guard_name' => 'api']);
         Permission::create(['name' => 'void invoices', 'guard_name' => 'api']);
         Permission::create(['name' => 'create payments', 'guard_name' => 'api']);
+
+        // *** START: NEW PERMISSIONS ***
+        // Users
+        Permission::create(['name' => 'view users', 'guard_name' => 'api']);
+
+        // Reports
+        Permission::create(['name' => 'view reports', 'guard_name' => 'api']);
+        // *** END: NEW PERMISSIONS ***
 
 
         // --- تعريف الأدوار وربطها بالصلاحيات ---
@@ -78,14 +98,13 @@ class RolesAndPermissionsSeeder extends Seeder
             'list work-orders', 'view work-orders', 'create work-orders', 'edit work-orders','delete work-orders',
             // Financials
             'create quotations','edit quotations', 'view quotations', 'create invoices', 'view invoices','void invoices', 'create payments',
-            'change work-order status',
+            'change work-order status','assign roles',
         ]);
-        // لاحظ أننا لم نعط موظف الاستقبال صلاحية الحذف (delete) عن قصد كمثال
 
         // 3. دور المدير (Admin)
-        $adminRole = Role::create(['name' => 'admin', 'guard_name' => 'api']);
-        // المدير سيحصل على كل الصلاحيات عبر Gate::before، لا حاجة لربطها هنا.
-
+       $adminRole = Role::firstOrCreate(['name' => 'admin', 'guard_name' => 'api']);
+        // هذا السطر يضمن أن المدير يحصل على الصلاحيات الجديدة تلقائياً
+        $adminRole->givePermissionTo(Permission::all());
 
         // --- إنشاء مستخدمين تجريبيين ---
         User::factory()->create([

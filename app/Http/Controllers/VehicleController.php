@@ -56,13 +56,21 @@ class VehicleController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Vehicle $vehicle): VehicleResource
-    {
-        // تحميل علاقة العميل المالك لضمان ظهورها في الـ JSON
-        $vehicle->loadMissing('client');
-
-        return new VehicleResource($vehicle);
+   public function show(Request $request, Vehicle $vehicle): VehicleResource
+{
+    // تحميل العلاقات المطلوبة ديناميكيًا من بارامتر 'include'
+    if ($request->has('include')) {
+        $relations = explode(',', $request->input('include'));
+        // يمكنك إضافة تحقق هنا للتأكد من أن العلاقة المطلوبة هي 'client' فقط
+        $allowedRelations = ['client'];
+        $validRelations = array_intersect($relations, $allowedRelations);
+        if (!empty($validRelations)) {
+            $vehicle->load($validRelations);
+        }
     }
+
+    return new VehicleResource($vehicle);
+}
 
     /**
      * Update the specified resource in storage.

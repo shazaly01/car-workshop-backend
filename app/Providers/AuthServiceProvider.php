@@ -20,7 +20,11 @@ use App\Policies\InvoicePolicy;
 use App\Policies\PaymentPolicy;
 use App\Models\CatalogItem;
 use App\Policies\CatalogItemPolicy;
-
+use App\Policies\ReportPolicy;
+use App\Policies\UserPolicy;
+use App\Models\User;
+use App\Policies\RolePolicy;
+use Spatie\Permission\Models\Role;
 class AuthServiceProvider extends ServiceProvider
 {
     /**
@@ -29,6 +33,8 @@ class AuthServiceProvider extends ServiceProvider
      * @var array<class-string, class-string>
      */
     protected $policies = [
+         User::class        => UserPolicy::class,
+          Role::class        => RolePolicy::class,
        Client::class    => ClientPolicy::class,
         Vehicle::class   => VehiclePolicy::class,
         WorkOrder::class => WorkOrderPolicy::class,
@@ -37,6 +43,7 @@ class AuthServiceProvider extends ServiceProvider
         Invoice::class   => InvoicePolicy::class,
         Payment::class   => PaymentPolicy::class,
         CatalogItem::class => CatalogItemPolicy::class,
+        'report'           => ReportPolicy::class,
     ];
 
     /**

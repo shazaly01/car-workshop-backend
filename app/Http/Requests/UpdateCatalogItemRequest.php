@@ -31,7 +31,7 @@ class UpdateCatalogItemRequest extends FormRequest
         return [
             // عند التحقق من تفرد كود الصنف، يجب أن نتجاهل الصنف الحالي نفسه
             'sku' => [
-                'required',
+                'nullable',
                 'string',
                 'max:50',
                 Rule::unique('catalog_items', 'sku')->ignore($catalogItemId),

@@ -10,7 +10,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB; // <-- 1. استيراد واجهة قاعدة البيانات
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
-
+use App\Http\Requests\UpdateDiagnosisRequest;
+use App\Http\Resources\WorkOrderResource;
 class DiagnosisController extends Controller
 {
     use AuthorizesRequests;
@@ -61,4 +62,35 @@ class DiagnosisController extends Controller
 
         return new DiagnosisResource($diagnosis);
     }
+
+
+
+     /**
+     * [جديد] تحديث تشخيص موجود.
+     *
+     * @param \App\Http\Requests\UpdateDiagnosisRequest $request
+     * @param \App\Models\Diagnosis $diagnosis
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function update(UpdateDiagnosisRequest $request, Diagnosis $diagnosis): JsonResponse
+    {
+        // صلاحيات التحقق تتم تلقائيًا عبر UpdateDiagnosisRequest
+
+        $validatedData = $request->validated();
+
+        // تحديث بيانات التشخيص
+        $diagnosis->update($validatedData);
+
+        // [الأهم] أعد تحميل أمر العمل الأب بالكامل مع جميع علاقاته
+        // هذا يضمن أن الواجهة الأمامية لديها دائمًا أحدث البيانات بعد التحديث.
+        $workOrder = $diagnosis->workOrder()->first()->fresh([
+            'client', 'vehicle', 'createdBy', 'diagnosis.technician',
+            'quotation.items.catalogItem',
+            'invoice.items', 'invoice.payments'
+        ]);
+
+        // أعد أمر العمل المحدث بالكامل باستخدام المورد الخاص به
+        return response()->json(['data' => new WorkOrderResource($workOrder)]);
+    }
+
 }

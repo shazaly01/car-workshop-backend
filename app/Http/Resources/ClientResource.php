@@ -24,7 +24,7 @@ class ClientResource extends JsonResource
             'registered_at' => $this->created_at->toFormattedDateString(), // تنسيق التاريخ
             // تحميل العلاقات فقط إذا كانت موجودة بالفعل
             'vehicles' => VehicleResource::collection($this->whenLoaded('vehicles')),
-            'work_orders_count' => $this->whenCounted('workOrders'), // مثال: إضافة عدد أوامر العمل
+            'work_orders' => WorkOrderResource::collection($this->whenLoaded('workOrders')), // مثال: إضافة عدد أوامر العمل
         ];
     }
 }

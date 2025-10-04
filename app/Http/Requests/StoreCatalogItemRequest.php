@@ -27,7 +27,7 @@ class StoreCatalogItemRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'sku' => 'required|string|max:50|unique:catalog_items,sku',
+            'sku' => 'nullable|string|max:50|unique:catalog_items,sku',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'type' => 'required|in:part,service',

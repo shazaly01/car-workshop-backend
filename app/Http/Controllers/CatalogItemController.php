@@ -8,6 +8,7 @@ use App\Models\CatalogItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Response;
+use Illuminate\Http\Request;
 
 class CatalogItemController extends Controller
 {
@@ -21,12 +22,20 @@ class CatalogItemController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index(): JsonResource
-    {
-        // يمكن إضافة فلترة هنا، مثلاً لجلب الأصناف النشطة فقط
-        $items = CatalogItem::where('is_active', true)->latest()->paginate(20);
-        return JsonResource::collection($items);
-    }
+   public function index(Request $request): JsonResource // <-- 2. إضافة Request هنا
+{
+    $items = CatalogItem::query() // ابدأ بـ query() للسماح بإضافة شروط
+        ->where('is_active', true)
+        // 3. إضافة شرط البحث الديناميكي
+        ->when($request->input('search'), function ($query, $searchTerm) {
+            // هذا الكود سينفذ فقط إذا كان بارامتر 'search' موجودًا في الطلب
+            $query->where('name', 'like', "%{$searchTerm}%");
+        })
+        ->latest()
+        ->paginate(20);
+
+    return JsonResource::collection($items);
+}
 
     /**
      * Store a newly created resource in storage.

@@ -57,14 +57,20 @@ class ClientController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Client $client): ClientResource
-    {
-        // تحميل العلاقات اللازمة
-        $client->load('vehicles')->loadCount('workOrders');
-
-        // إرجاع العميل باستخدام المورد
-        return new ClientResource($client);
+   public function show(Request $request, Client $client): ClientResource
+{
+    // تحميل العلاقات المطلوبة ديناميكيًا من بارامتر 'include'
+    if ($request->has('include')) {
+        $relations = explode(',', $request->input('include'));
+        // يمكنك إضافة تحقق هنا للتأكد من أن العلاقات المطلوبة مسموح بها
+        $client->load($relations);
     }
+
+    // يمكنك أيضًا تحميل عدد علاقات أخرى بشكل دائم إذا أردت
+    $client->loadCount('workOrders');
+
+    return new ClientResource($client);
+}
 
     /**
      * Update the specified resource in storage.

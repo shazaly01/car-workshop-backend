@@ -66,4 +66,15 @@ class Invoice extends Model
     {
         return $this->hasMany(Payment::class);
     }
+
+
+    /**
+     * [الحل هنا] Get all of the revisions for the Invoice.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     */
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(InvoiceRevision::class);
+    }
 }

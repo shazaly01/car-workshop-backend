@@ -41,4 +41,10 @@ class Vehicle extends Model
     {
         return $this->hasMany(WorkOrder::class);
     }
+
+
+    public function openWorkOrder()
+{
+    return $this->hasOne(WorkOrder::class)->whereNotIn('status', ['completed', 'cancelled']);
+}
 }

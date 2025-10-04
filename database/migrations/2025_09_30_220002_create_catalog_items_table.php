@@ -10,7 +10,7 @@ return new class extends Migration
     {
         Schema::create('catalog_items', function (Blueprint $table) {
             $table->id();
-            $table->string('sku')->unique()->comment('Stock Keeping Unit - كود الصنف الفريد');
+            $table->string('sku')->unique()->nullable()->comment('Stock Keeping Unit - كود الصنف الفريد');
             $table->string('name');
             $table->text('description')->nullable();
             $table->enum('type', ['part', 'service'])->comment('نوع الصنف: قطعة غيار أو خدمة');

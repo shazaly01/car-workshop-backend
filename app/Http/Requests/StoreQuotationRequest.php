@@ -22,7 +22,7 @@ class StoreQuotationRequest extends FormRequest
 public function rules(): array
 {
     return [
-        'work_order_id' => 'required|exists:work_orders,id',
+       // 'work_order_id' => 'required|exists:work_orders,id',
         'issue_date' => 'required|date',
         'expiry_date' => 'required|date|after_or_equal:issue_date', // تاريخ الانتهاء يجب أن يكون بعد تاريخ الإصدار
         'notes' => 'nullable|string',
