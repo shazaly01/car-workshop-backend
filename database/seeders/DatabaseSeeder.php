@@ -15,11 +15,11 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-      $this->call([
-
-            RolesAndPermissionsSeeder::class,
-
-
+     $this->call([
+            RolesAndPermissionsSeeder::class, // أولاً: لإنشاء الأدوار والمستخدمين
+            CatalogItemSeeder::class,          // ثانياً: لإنشاء عناصر الكتالوج
+            ClientsAndVehiclesSeeder::class,   // ثالثاً: لإنشاء العملاء ومركباتهم
+            WorkOrderLifecycleSeeder::class,   // أخيراً: لمحاكاة دورة العمل الكاملة
         ]);
     }
 }
